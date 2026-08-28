@@ -27,6 +27,9 @@ const { Pickup } = await import(`${B}/entities/Pickup.js`);
 const { CombatSystem } = await import(`${B}/systems/CombatSystem.js`);
 const { InteractionSystem } = await import(`${B}/systems/Interaction.js`);
 const { WORLD_ITEMS } = await import(`${B}/systems/Items.js`);
+const { Mutant, MUTANT_TYPES } = await import(`${B}/entities/Mutant.js`);
+const { DialogueSystem, SCRIPT } = await import(`${B}/systems/Dialogue.js`);
+const { HIDDEN_BOSSES } = await import(`${B}/world/LevelData.js`);
 
 const results = [];
 const check = (name, cond, extra = '') => {
@@ -243,6 +246,84 @@ check('굶으면 HP가 깎임', player.hp < player.maxHp, `HP ${player.hp.toFixe
 player.addItem('canned-food', '통조림', 1);
 player.eat('canned-food', 50);
 check('먹으면 허기 회복 + 소모', player.hunger >= 50 && !player.hasItem('canned-food'), `허기 ${player.hunger.toFixed(0)}`);
+
+
+// ------------------------------------------------------ 숨겨진 보스 (2회차)
+
+section('숨겨진 보스 / 2회차');
+
+const badSpots = HIDDEN_BOSSES.filter((b) => !facility.isWalkable(b.x, b.z, 0.9));
+check('숨겨진 보스 3기가 걸을 수 있는 곳에 배치됨', badSpots.length === 0,
+  badSpots.map((b) => b.type).join(', '));
+check('보스 수 = 필요한 재료 수', HIDDEN_BOSSES.length === 3);
+
+// each type must actually be able to hurt you, or it's scenery with a health bar
+for (const spot of HIDDEN_BOSSES) {
+  player.reset(facility.spawnPoint);
+  const darts2 = [];
+  const m = new Mutant(facility, new THREE.Vector3(spot.x, 0, spot.z), spot.type, {
+    area: spot.area,
+    onProjectile: (proj) => darts2.push(proj),
+  });
+  const def = MUTANT_TYPES[spot.type];
+
+  // far away: stays asleep
+  teleport(spot.x + 20, spot.z);
+  for (let i = 0; i < 60; i++) m.update(DT, player);
+  const sleptWhenFar = !m.awake;
+
+  // walk up: wakes
+  teleport(spot.x, spot.z - 3);
+  for (let i = 0; i < 30; i++) m.update(DT, player);
+  check(`${def.name} 접근 시 각성`, sleptWhenFar && m.awake,
+    `멀 때 수면=${sleptWhenFar}, 접근 후 각성=${m.awake}`);
+
+  const hpStart = player.hp;
+  for (let i = 0; i < 900; i++) {
+    // hold position so the fight is about its attacks, not about chasing
+    teleport(spot.x, spot.z - 3);
+    m.update(DT, player);
+    for (const d of darts2) d.update(DT, player, facility);
+    player.invulnTimer = Math.max(0, player.invulnTimer - DT);
+  }
+  check(`${def.name}(${def.pattern})가 피해를 입힘`, player.hp < hpStart,
+    `HP ${hpStart.toFixed(0)} → ${player.hp.toFixed(0)}`);
+
+  // and it has to be killable. reset first -- the damage test above leaves the
+  // player dead, and a dead player never swings.
+  player.reset(facility.spawnPoint);
+  m.hp = m.maxHp;
+  const solo = [];
+  const soloCombat = new CombatSystem(player, solo, {});
+  solo.push(m);
+  player.attackDamage = 45;
+  player.hp = 999; player.maxHp = 999;
+  for (let i = 0; i < 3000 && m.alive; i++) {
+    player.mesh.position.set(m.position.x, 0, m.position.z - 1.8);
+    player.facingAngle = 0;
+    input.attackPressed = player.attackCooldownTimer <= 0;
+    player.update(DT, input, camera);
+    soloCombat.update(DT);
+    m.update(DT, player);
+    player.hp = player.maxHp;
+    input.endFrame();
+  }
+  check(`${def.name} 처치 가능`, !m.alive, `HP ${m.hp}/${m.maxHp}`);
+  check(`${def.name}가 이상한 재료를 떨굼`, m.lootId === 'strange-material');
+}
+
+// 대사 시스템: Enter 한 번이 열기와 넘기기를 동시에 하면 안 된다
+section('대사');
+const dlg = new DialogueSystem();
+let finished = false;
+dlg.say(SCRIPT.intro, () => { finished = true; });
+check('대사 시작', dlg.active && dlg.current.text === SCRIPT.intro[0].text);
+dlg.update({ confirmPressed: true }); // 여는 프레임은 무시되어야 함
+check('여는 프레임의 Enter는 무시', dlg.index === 0);
+dlg.update({ confirmPressed: true });
+check('Enter로 다음 줄', dlg.index === 1);
+while (dlg.active) dlg.update({ confirmPressed: true });
+check('끝나면 콜백 호출', finished && !dlg.active);
 
 // ------------------------------------------------------------ 렌더링 부하
 

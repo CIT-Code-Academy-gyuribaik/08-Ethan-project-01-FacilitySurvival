@@ -133,6 +133,14 @@ export const PROPS = [
   { x: 12, z: 86, w: 2, d: 2, h: 1.6, kind: 'pillar' },
 ];
 
+// 2회차에만 깨어나는 숨겨진 보스 (기획서 8번). 본편 동선에서 살짝 벗어난
+// 곳에 하나씩 둬서, 노멀 엔딩만 볼 사람은 지나쳐도 되게 했다.
+export const HIDDEN_BOSSES = [
+  { type: 'W-01', x: -23, z: 27, area: 'storage' },
+  { type: 'D-02', x: 26, z: 24, area: 'lab' },
+  { type: 'C-00', x: -25, z: 39.5, area: 'vault' },
+];
+
 // 천장 형광등 위치 [x, z, 밝기]
 export const LIGHTS = [
   [0, -2.5, 1.0], [0, 9, 0.9],

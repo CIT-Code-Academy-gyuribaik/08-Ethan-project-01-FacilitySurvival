@@ -8,15 +8,19 @@ import { Wolf } from './entities/Wolf.js';
 import { Deer } from './entities/Deer.js';
 import { Scientist } from './entities/Scientist.js';
 import { Commander } from './entities/Commander.js';
+import { Mutant } from './entities/Mutant.js';
 import { Pickup } from './entities/Pickup.js';
 import { CombatSystem } from './systems/CombatSystem.js';
 import { InteractionSystem } from './systems/Interaction.js';
 import { ITEMS, WORLD_ITEMS } from './systems/Items.js';
+import { HIDDEN_BOSSES } from './world/LevelData.js';
 import { SaveSystem } from './systems/SaveSystem.js';
+import { DialogueSystem, SCRIPT } from './systems/Dialogue.js';
 import { HUD } from './ui/HUD.js';
 
 const WOLF_SPAWN_INTERVAL = 40; // seconds between reinforcements in chapter 1
 const SCIENTIST_COUNT = 4;
+const MATERIALS_FOR_SECRET = HIDDEN_BOSSES.length; // 기획서 8번: 재료를 모두 모아야 함
 
 const canvas = document.getElementById('game-canvas');
 const game = new Game(canvas);
@@ -33,6 +37,7 @@ const pickups = [];
 const projectiles = [];
 
 const interaction = new InteractionSystem(player);
+const dialogue = new DialogueSystem();
 const combat = new CombatSystem(player, enemies, {
   onKill: (e) => onEnemyKilled(e),
 });
@@ -48,7 +53,9 @@ const run = {
   chapter2Started: false,
   commander: null,
   commanderDefeated: false,
+  ngPlus: false, // 2회차 이상: 숨겨진 보스가 깨어나고 적이 강해진다
   takenWorldItems: [], // indices into WORLD_ITEMS, so a reload doesn't respawn them
+  mutants: [],
 };
 
 let menuIndex = 0;
@@ -70,9 +77,32 @@ function addEnemy(enemy) {
 }
 
 function spawnWolf(tier = 1, position) {
+  const bumped = tier + (run.ngPlus ? 1 : 0);
   return addEnemy(
-    new Wolf(facility, position ?? facility.randomHuntingGround(player.position), tier)
+    new Wolf(facility, position ?? facility.randomHuntingGround(player.position), bumped)
   );
+}
+
+// The facility's original specimens. Second run only -- they're the whole
+// content of 기획서 8번's ??? ending, and dropping them into a first run would
+// spoil the twist and wreck the difficulty curve at the same time.
+function spawnHiddenBosses() {
+  run.mutants = [];
+  for (const spot of HIDDEN_BOSSES) {
+    const m = new Mutant(facility, new THREE.Vector3(spot.x, 0, spot.z), spot.type, {
+      area: spot.area,
+      onProjectile: (proj) => {
+        projectiles.push(proj);
+        game.scene.add(proj.mesh);
+      },
+      onWake: (self) => {
+        dialogue.say(SCRIPT.mutantWake);
+        hud.log(`${self.name} — ${self.def.subtitle}`);
+      },
+    });
+    m.onSlam = (center, radius) => spawnShockwave(center, radius);
+    run.mutants.push(addEnemy(m));
+  }
 }
 
 function spawnDeer(position) {
@@ -94,6 +124,17 @@ function spawnPickup(itemId, position, count = 1) {
       pickup.taken = true;
       p.addItem(pickup.itemId, pickup.name, pickup.count);
       hud.log(`${pickup.name}을(를) 얻었다.`);
+      if (pickup.itemId === 'research-log') {
+        dialogue.say([
+          { speaker: '연구 일지', text: '"복제체는 안정적이다. 원본 3기는 하위 구역에 봉인했다."' },
+          { speaker: '연구 일지', text: '"실험체가 원본을 마주하는 경우는 상정하지 않았다."' },
+          { speaker: '', text: '...원본. 이 시설에 아직 뭔가 남아 있다.' },
+        ]);
+      }
+      if (pickup.itemId === 'strange-material') {
+        const n = p.countOf('strange-material');
+        hud.log(`이상한 재료 ${n}/${MATERIALS_FOR_SECRET}`);
+      }
       removePickup(pickup, this);
       if (pickup.worldIndex !== undefined) run.takenWorldItems.push(pickup.worldIndex);
     },
@@ -144,7 +185,7 @@ function onEnemyKilled(enemy) {
     run.commander = null;
     hud.hideBoss();
     facility.markEscapeReady();
-    hud.log('사령관이 무릎을 꿇었다. 출구의 잠금이 풀렸다.');
+    dialogue.say(SCRIPT.commanderDefeated);
     hud.setObjective('아레나 끝의 문으로 탈출하기');
   } else if (enemy instanceof Scientist) {
     const left = enemies.filter((e) => e instanceof Scientist && e.alive).length;
@@ -165,6 +206,7 @@ function startChapter2() {
 
   hud.log('공기가 차가워졌다. 발소리가 들린다.');
   hud.setObjective(`시설 심부의 연구원 제압 (0/${SCIENTIST_COUNT})`);
+  dialogue.say(SCRIPT.scientistFirst);
 
   const spots = [
     [-10, 74], [10, 74], [-7, 84], [8, 84],
@@ -188,13 +230,38 @@ function startChapter2() {
 
 function spawnCommander() {
   const boss = new Commander(facility, new THREE.Vector3(0, 0, 88));
+  if (run.ngPlus) {
+    boss.maxHp = Math.round(boss.maxHp * 1.3);
+    boss.hp = boss.maxHp;
+  }
   boss.onSlam = (center, radius) => spawnShockwave(center, radius);
   boss.onPhaseChange = () => hud.log('사령관이 갑주의 잠금을 풀었다.');
   run.commander = addEnemy(boss);
-  hud.showBoss(boss.name);
-  hud.updateBoss(boss.hp, boss.maxHp);
-  hud.log('사령관: "실험체가 여기까지 왔군."');
   hud.setObjective('사령관 처치');
+  dialogue.say(run.ngPlus ? SCRIPT.commanderAppearNgPlus : SCRIPT.commanderAppear);
+}
+
+// One bar, whichever big thing is currently fighting you. Mutants are optional
+// and can be walked away from, so the bar follows the nearest awake one.
+function updateBossBar() {
+  let target = run.commander?.alive ? run.commander : null;
+  if (!target) {
+    let best = Infinity;
+    for (const m of run.mutants) {
+      if (!m.alive || !m.awake) continue;
+      const d = m.position.distanceTo(player.position);
+      if (d < 24 && d < best) {
+        best = d;
+        target = m;
+      }
+    }
+  }
+  if (target) {
+    hud.showBoss(target.name);
+    hud.updateBoss(target.hp, target.maxHp);
+  } else {
+    hud.hideBoss();
+  }
 }
 
 // Purely visual: an expanding ring on the floor where the slam landed.
@@ -282,6 +349,7 @@ function clearWorld() {
   projectiles.length = 0;
   for (const s of shockwaves) game.scene.remove(s.ring);
   shockwaves.length = 0;
+  run.mutants = [];
   // pickup targets die with their pickups; door/bed/exit are marked fixed
   interaction.targets = interaction.targets.filter((t) => t.fixed);
   interaction.current = null;
@@ -290,6 +358,9 @@ function clearWorld() {
 function newRun(saved = null) {
   clearWorld();
   facility.resetDoors();
+  dialogue.clear();
+  hud.hideDialogue();
+  run.ngPlus = SaveSystem.isNewGamePlus;
 
   run.chapter = saved?.chapter ?? 1;
   run.elapsed = saved?.elapsed ?? 0;
@@ -321,16 +392,20 @@ function newRun(saved = null) {
   spawnWorldItems();
   for (let i = 0; i < 4; i++) spawnDeer();
   for (let i = 0; i < 2; i++) spawnWolf();
+  if (run.ngPlus) spawnHiddenBosses();
 
   hud.hideBoss();
   hud.setObjective('시설을 돌아다니며 출구를 찾기');
   hud.setHudVisible(true);
   hud.hideOverlay();
   run.mode = 'playing';
+  // A loaded save drops you back mid-story; replaying the opening would be noise.
+  if (!saved) dialogue.say(run.ngPlus ? SCRIPT.introNgPlus : SCRIPT.intro);
 }
 
 function finishRun() {
-  const secret = SaveSystem.isNewGamePlus && player.hasItem('strange-material');
+  const secret =
+    run.ngPlus && player.countOf('strange-material') >= MATERIALS_FOR_SECRET;
   run.mode = 'ending';
   hud.setHudVisible(false);
   hud.hideBoss();
@@ -340,9 +415,10 @@ function finishRun() {
     SaveSystem.recordClear('secret');
     hud.showOverlay(
       '??? 엔딩',
-      '문을 나서기 전, 주머니 속 재료가 맥박처럼 뛰었다.<br />' +
-        '주인공은 뒤를 돌아본다. 시설은 감옥이 아니라 설계도였다.<br />' +
-        '밖으로 나온 것은 실험체가 아니라, 실험의 <b>결과</b>였다.',
+'문을 나서기 전, 세 개의 재료가 한 박자로 뛰기 시작했다.<br />' +
+        '원본은 전부 죽었고, 남은 것은 그것들을 죽인 쪽이다.<br />' +
+        '시설은 감옥이 아니라 설계도였다. 밖으로 나온 것은<br />' +
+        '실험체가 아니라, 실험의 <b>결과</b>였다.',
       'Enter — 처음으로',
       { tone: 'bad' }
     );
@@ -566,6 +642,21 @@ const mainLoop = {
 function tick(dt) {
   run.elapsed += dt;
 
+  // Dialogue is a cutscene: hold the world so a story beat can't be interrupted
+  // by a wolf, and so Enter unambiguously means "next line".
+  if (dialogue.active) {
+    dialogue.update(input);
+    if (dialogue.active) {
+      const line = dialogue.current;
+      hud.showDialogue(line.speaker, line.text);
+    } else {
+      hud.hideDialogue();
+    }
+    updateCamera(dt);
+    hud.update(dt, player);
+    return;
+  }
+
   if (input.pausePressed || input.cancelPressed) {
     showPauseMenu();
     return;
@@ -600,7 +691,7 @@ function tick(dt) {
     if (area === 'arena' || area === 'corr3') startChapter2();
   }
 
-  if (run.commander?.alive) hud.updateBoss(run.commander.hp, run.commander.maxHp);
+  updateBossBar();
 
   // chapter 1 difficulty ramp: reinforcements keep arriving, and get nastier
   if (!run.chapter2Started) {
@@ -619,6 +710,14 @@ function tick(dt) {
   }
 
   hud.setPrompt(interaction.promptText);
+  if (run.ngPlus && run.commanderDefeated) {
+    const n = player.countOf('strange-material');
+    hud.setObjective(
+      n >= MATERIALS_FOR_SECRET
+        ? '재료를 모두 모았다. 문으로 나가기'
+        : `아레나 끝의 문으로 탈출하기 (재료 ${n}/${MATERIALS_FOR_SECRET})`
+    );
+  }
   updateCamera(dt);
   hud.update(dt, player);
 }

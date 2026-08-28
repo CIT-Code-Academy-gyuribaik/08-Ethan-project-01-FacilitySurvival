@@ -38,6 +38,12 @@ export class HUD {
 
       <div id="prompt" class="prompt hidden"></div>
 
+      <div id="dialogue" class="dialogue hidden">
+        <div id="dialogue-speaker" class="dialogue-speaker"></div>
+        <div id="dialogue-text" class="dialogue-text"></div>
+        <div class="dialogue-next">Enter ▾</div>
+      </div>
+
       <div id="hint-bar" class="hint-bar">
         이동 WASD · 공격 Space · 상호작용 Enter · 먹기 F · 메뉴 Shift
       </div>
@@ -63,6 +69,9 @@ export class HUD {
     this.bossNameEl = q('#boss-name');
     this.bossFillEl = q('#boss-fill');
     this.promptEl = q('#prompt');
+    this.dialogueEl = q('#dialogue');
+    this.dialogueSpeakerEl = q('#dialogue-speaker');
+    this.dialogueTextEl = q('#dialogue-text');
     this.hintBarEl = q('#hint-bar');
     this.overlayEl = q('#overlay');
     this.overlayTitleEl = q('#overlay-title');
@@ -77,7 +86,10 @@ export class HUD {
   }
 
   setObjective(text) {
-    this.objectiveEl.textContent = text ? `목표: ${text}` : '';
+    // called every frame while the secret-ending counter is live, so don't
+    // touch the DOM unless it actually changed
+    const next = text ? `목표: ${text}` : '';
+    if (this.objectiveEl.textContent !== next) this.objectiveEl.textContent = next;
   }
 
   setPrompt(text) {
@@ -89,8 +101,20 @@ export class HUD {
     }
   }
 
+  showDialogue(speaker, text) {
+    this.dialogueEl.classList.remove('hidden');
+    this.dialogueSpeakerEl.textContent = speaker || '';
+    this.dialogueSpeakerEl.classList.toggle('hidden', !speaker);
+    this.dialogueTextEl.textContent = text;
+    this.setPrompt(null);
+  }
+
+  hideDialogue() {
+    this.dialogueEl.classList.add('hidden');
+  }
+
   showBoss(name) {
-    this.bossNameEl.textContent = name;
+    if (this.bossNameEl.textContent !== name) this.bossNameEl.textContent = name;
     this.bossBarEl.classList.remove('hidden');
   }
 
@@ -109,6 +133,7 @@ export class HUD {
   }
 
   showOverlay(title, subtitle = '', hint = '', { tone = '' } = {}) {
+    this.hideDialogue();
     this.overlayEl.classList.remove('hidden');
     this.overlayEl.className = `overlay ${tone}`;
     this.overlayTitleEl.textContent = title;

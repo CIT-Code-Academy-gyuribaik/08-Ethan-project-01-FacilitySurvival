@@ -13,6 +13,7 @@ export const ITEMS = {
   keycard: { name: '출입 카드', kind: 'key', color: 0x44d0ff },
   stimulant: { name: '강화 주사기', kind: 'boost', attack: 6, maxHp: 15, color: 0x66ffbb },
   'strange-material': { name: '이상한 재료', kind: 'quest', color: 0xcc66ff },
+  'research-log': { name: '연구 일지', kind: 'quest', color: 0xffcf66 },
 };
 
 export function itemName(id) {
@@ -30,6 +31,6 @@ export const WORLD_ITEMS = [
   { id: 'keycard', x: 29.5, z: 21 },
   { id: 'stimulant', x: 24, z: 30.6 },
   { id: 'canned-food', x: 21, z: 30 },
-  { id: 'strange-material', x: -25, z: 41 },
-  { id: 'canned-food', x: -27, z: 38 },
+  { id: 'research-log', x: -28, z: 42 },
+  { id: 'canned-food', x: -22, z: 42 },
 ];
