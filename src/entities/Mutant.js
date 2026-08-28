@@ -16,22 +16,29 @@ export const MUTANT_TYPES = {
   'W-01': {
     name: '표본 W-01',
     subtitle: '늑대의 원형',
-    hp: 170, speed: 4.6, damage: 20, pattern: 'lunge',
-    tell: 0.5, cooldown: 1.9, range: 2.2,
+    hp: 110, speed: 4.3, damage: 13, pattern: 'lunge',
+    tell: 0.75, cooldown: 2.6, range: 2.2,
   },
   'D-02': {
     name: '표본 D-02',
     subtitle: '사슴의 원형',
-    hp: 140, speed: 3.4, damage: 11, pattern: 'volley',
-    tell: 0.6, cooldown: 2.4, range: 9,
+    hp: 95, speed: 3.2, damage: 7, pattern: 'volley',
+    tell: 0.8, cooldown: 3.0, range: 9,
   },
   'C-00': {
     name: '표본 C-00',
     subtitle: '폐기된 시제품',
-    hp: 230, speed: 2.4, damage: 26, pattern: 'slam',
-    tell: 0.95, cooldown: 2.0, range: 5.5,
+    hp: 130, speed: 2.3, damage: 16, pattern: 'slam',
+    tell: 1.2, cooldown: 2.8, range: 5,
   },
 };
+
+// How far a woken specimen will follow you before giving up and going home.
+// Without a leash, waking one in the storage means it trails you through the
+// hall while the wolves pile on -- and there'd be no way to back out of a fight
+// you opened by accident. It keeps the damage you've done, so retreating to
+// heal and coming back is a real tactic rather than a reset.
+const LEASH_RADIUS = 20;
 
 const DASH_SPEED = 15;
 const DASH_TIME = 0.55;
@@ -53,6 +60,7 @@ export class Mutant extends Creature {
 
     this.awake = false;
     this.state = 'dormant';
+    this.home = new THREE.Vector3().copy(position);
     this._timer = 0;
     this._cooldown = def.cooldown;
     this._dashDir = new THREE.Vector3();
@@ -213,6 +221,24 @@ export class Mutant extends Creature {
     this._timer -= dt;
     this._cooldown -= dt;
     const dist = this.mesh.position.distanceTo(player.position);
+
+    // Chased too far from its tank? Walk back. Mid-attack states are left alone
+    // so a lunge or a slam always resolves instead of being cancelled halfway.
+    if (this.state === 'idle' || this.state === 'returning') {
+      const fromHome = this.mesh.position.distanceTo(this.home);
+      if (this.state === 'idle' && (dist > LEASH_RADIUS || fromHome > LEASH_RADIUS)) {
+        this.state = 'returning';
+      }
+      if (this.state === 'returning') {
+        if (dist < LEASH_RADIUS * 0.6 && fromHome < LEASH_RADIUS) {
+          this.state = 'idle';
+        } else if (this._moveToward(this.home, dt, 0.8) < 1) {
+          this.state = 'idle';
+        }
+        this._applyHitFlash(dt, this.material);
+        return;
+      }
+    }
 
     switch (this.state) {
       case 'idle': {

@@ -312,6 +312,31 @@ for (const spot of HIDDEN_BOSSES) {
   check(`${def.name}가 이상한 재료를 떨굼`, m.lootId === 'strange-material');
 }
 
+// 실수로 깨웠을 때 물러설 수 있어야 한다: 멀리 도망가면 제자리로 돌아간다
+player.reset(facility.spawnPoint);
+const leashSpot = HIDDEN_BOSSES[0];
+const leashBoss = new Mutant(
+  facility, new THREE.Vector3(leashSpot.x, 0, leashSpot.z), leashSpot.type, { area: leashSpot.area }
+);
+teleport(leashSpot.x, leashSpot.z - 3);
+for (let i = 0; i < 60; i++) leashBoss.update(DT, player);
+const wokeUp = leashBoss.awake;
+leashBoss.hp = leashBoss.maxHp * 0.5; // 절반 깎아둔 상태로 도망친다
+
+teleport(2, 22); // 중앙 홀 반대편으로 도주
+let chasedDistance = Infinity;
+for (let i = 0; i < 900; i++) {
+  leashBoss.update(DT, player);
+  chasedDistance = Math.min(chasedDistance, leashBoss.position.distanceTo(player.position));
+}
+const home = new THREE.Vector3(leashSpot.x, 0, leashSpot.z);
+check('도망치면 보스가 추격을 포기함', chasedDistance > 6,
+  `가장 가까웠던 거리 ${chasedDistance.toFixed(1)}m`);
+check('제자리로 복귀', leashBoss.position.distanceTo(home) < 4,
+  `둥지에서 ${leashBoss.position.distanceTo(home).toFixed(1)}m`);
+check('입힌 피해는 유지 (복귀해도 회복 안 함)', leashBoss.hp <= leashBoss.maxHp * 0.5,
+  `HP ${leashBoss.hp}/${leashBoss.maxHp}`);
+
 // 대사 시스템: Enter 한 번이 열기와 넘기기를 동시에 하면 안 된다
 section('대사');
 const dlg = new DialogueSystem();
