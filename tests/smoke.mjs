@@ -334,8 +334,26 @@ check('도망치면 보스가 추격을 포기함', chasedDistance > 6,
   `가장 가까웠던 거리 ${chasedDistance.toFixed(1)}m`);
 check('제자리로 복귀', leashBoss.position.distanceTo(home) < 4,
   `둥지에서 ${leashBoss.position.distanceTo(home).toFixed(1)}m`);
-check('입힌 피해는 유지 (복귀해도 회복 안 함)', leashBoss.hp <= leashBoss.maxHp * 0.5,
-  `HP ${leashBoss.hp}/${leashBoss.maxHp}`);
+check('떨어져 있으면 체력 회복 (후퇴 후 반복 견제 차단)', leashBoss.hp > leashBoss.maxHp * 0.5,
+  `HP ${leashBoss.hp.toFixed(0)}/${leashBoss.maxHp}`);
+
+// 체력 절반에서 격앙: 공격 간격이 짧아지고 빨라진다
+player.reset(facility.spawnPoint);
+const rageSpot = HIDDEN_BOSSES[2];
+const rageBoss = new Mutant(
+  facility, new THREE.Vector3(rageSpot.x, 0, rageSpot.z), rageSpot.type, { area: rageSpot.area }
+);
+teleport(rageSpot.x, rageSpot.z - 3);
+for (let i = 0; i < 30; i++) rageBoss.update(DT, player);
+const calmSpeed = rageBoss.speed;
+let announced = false;
+rageBoss.onEnrage = () => { announced = true; };
+check('절반 위에서는 평상시', !rageBoss.enraged);
+rageBoss.takeDamage(rageBoss.maxHp * 0.55);
+rageBoss.update(DT, player);
+check('체력 절반에서 격앙 전환', rageBoss.enraged && announced);
+check('격앙 시 더 빨라짐', rageBoss.speed > calmSpeed,
+  `${calmSpeed.toFixed(1)} → ${rageBoss.speed.toFixed(1)}`);
 
 // 대사 시스템: Enter 한 번이 열기와 넘기기를 동시에 하면 안 된다
 section('대사');

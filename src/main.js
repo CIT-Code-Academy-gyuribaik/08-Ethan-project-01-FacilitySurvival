@@ -101,6 +101,7 @@ function spawnHiddenBosses() {
       },
     });
     m.onSlam = (center, radius) => spawnShockwave(center, radius);
+    m.onEnrage = (self) => hud.log(`${self.name}의 봉인이 완전히 풀렸다.`);
     run.mutants.push(addEnemy(m));
   }
 }

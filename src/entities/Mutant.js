@@ -16,20 +16,20 @@ export const MUTANT_TYPES = {
   'W-01': {
     name: '표본 W-01',
     subtitle: '늑대의 원형',
-    hp: 110, speed: 4.3, damage: 13, pattern: 'lunge',
-    tell: 0.75, cooldown: 2.6, range: 2.2,
+    hp: 150, speed: 4.5, damage: 17, pattern: 'lunge',
+    tell: 0.6, cooldown: 2.1, range: 2.2,
   },
   'D-02': {
     name: '표본 D-02',
     subtitle: '사슴의 원형',
-    hp: 95, speed: 3.2, damage: 7, pattern: 'volley',
-    tell: 0.8, cooldown: 3.0, range: 9,
+    hp: 125, speed: 3.4, damage: 10, pattern: 'volley',
+    tell: 0.65, cooldown: 2.4, range: 9,
   },
   'C-00': {
     name: '표본 C-00',
     subtitle: '폐기된 시제품',
-    hp: 130, speed: 2.3, damage: 16, pattern: 'slam',
-    tell: 1.2, cooldown: 2.8, range: 5,
+    hp: 190, speed: 2.5, damage: 22, pattern: 'slam',
+    tell: 1.0, cooldown: 2.2, range: 5.2,
   },
 };
 
@@ -39,6 +39,20 @@ export const MUTANT_TYPES = {
 // you opened by accident. It keeps the damage you've done, so retreating to
 // heal and coming back is a real tactic rather than a reset.
 const LEASH_RADIUS = 20;
+
+// Disengaging heals it. The leash alone made "back off, regenerate, plink"
+// strictly better than fighting -- the player regenerates 1.2 hp/s, so any
+// specimen that kept its wounds could be ground down at zero risk. It out-heals
+// you by a wide margin, which makes retreat a way to survive rather than a way
+// to win.
+const DISENGAGE_RADIUS = 14;
+const REGEN_PER_SEC = 5;
+
+// Below half health it stops giving you as much room. Escalation the player can
+// feel beats a bigger health bar they just chew through.
+const ENRAGE_AT = 0.5;
+const ENRAGE_COOLDOWN_MUL = 0.65;
+const ENRAGE_SPEED_MUL = 1.15;
 
 const DASH_SPEED = 15;
 const DASH_TIME = 0.55;
@@ -60,6 +74,7 @@ export class Mutant extends Creature {
 
     this.awake = false;
     this.state = 'dormant';
+    this.enraged = false;
     this.home = new THREE.Vector3().copy(position);
     this._timer = 0;
     this._cooldown = def.cooldown;
@@ -175,6 +190,20 @@ export class Mutant extends Creature {
     this.onWake?.(this);
   }
 
+  _enrage() {
+    this.enraged = true;
+    this.speed = this.def.speed * ENRAGE_SPEED_MUL;
+    this.eyeMat.emissive.setHex(0xff3355);
+    this.ringMat.color.setHex(0xff3355);
+    this.aura.color.setHex(0xff3355);
+    this.aura.intensity = 1.6;
+    this.onEnrage?.(this);
+  }
+
+  get _attackCooldown() {
+    return this.def.cooldown * (this.enraged ? ENRAGE_COOLDOWN_MUL : 1);
+  }
+
   _showRing(radius, progress) {
     this.ring.visible = true;
     this.ring.scale.setScalar(Math.max(0.01, radius));
@@ -221,6 +250,11 @@ export class Mutant extends Creature {
     this._timer -= dt;
     this._cooldown -= dt;
     const dist = this.mesh.position.distanceTo(player.position);
+
+    if (dist > DISENGAGE_RADIUS && this.hp < this.maxHp) {
+      this.hp = Math.min(this.maxHp, this.hp + REGEN_PER_SEC * dt);
+    }
+    if (!this.enraged && this.hp <= this.maxHp * ENRAGE_AT) this._enrage();
 
     // Chased too far from its tank? Walk back. Mid-attack states are left alone
     // so a lunge or a slam always resolves instead of being cancelled halfway.
@@ -285,7 +319,7 @@ export class Mutant extends Creature {
             this._timer = DASH_TIME;
             this._hitThisDash = false;
           }
-          this._cooldown = this.def.cooldown;
+          this._cooldown = this._attackCooldown;
         }
         break;
       }

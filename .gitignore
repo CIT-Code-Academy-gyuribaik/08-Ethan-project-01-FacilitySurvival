@@ -25,3 +25,6 @@ dist-ssr
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Claude Code worktrees (other sessions working in this repo)
+.claude/worktrees/
