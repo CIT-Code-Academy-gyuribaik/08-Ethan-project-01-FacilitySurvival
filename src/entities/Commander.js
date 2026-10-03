@@ -13,18 +13,22 @@ const CHARGE_SPEED = 13;
 const CHARGE_TIME = 0.75;
 const CHARGE_DAMAGE = 22;
 const PHASE2_AT = 0.5; // fraction of hp where the fight escalates
+const SUMMON_INTERVAL = 13; // seconds between reinforcement calls in phase 2
 
-// "사령관 - 멋진 갑옷을 입은 인간", the final boss (기획서 4번/12번).
+// "사령관 - 멋진 갑옷을 입은 인간" = project 0003, the head commander and final
+// boss (기획서 4번/5번/12번). He's one of the experiments himself. HP 300 per
+// the balancing table; in phase 2 he calls scientists in, so standing and
+// trading is a losing plan.
 //
 // Every attack is telegraphed on the floor or in his posture before it lands,
 // because the design doc's only defensive verb is movement ("이동으로 공격
 // 피하기") -- an untelegraphed boss would be unfair with no block or dodge roll.
 export class Commander extends Creature {
   constructor(facility, position) {
-    super(facility, position, { hp: 450, speed: 2.6, wanderArea: 'arena', expValue: 0 });
+    super(facility, position, { hp: 300, speed: 2.6, wanderArea: 'arena', expValue: 0 });
     this.hostile = true;
     this.isBoss = true;
-    this.name = '사령관';
+    this.name = 'project 0003';
     this.phase = 1;
 
     this.state = 'idle';
@@ -33,6 +37,7 @@ export class Commander extends Creature {
     this._chargeDir = new THREE.Vector3();
     this._hitPlayerThisMove = false;
     this._slamNext = false;
+    this._summonTimer = SUMMON_INTERVAL;
 
     this._buildMesh();
   }
@@ -49,19 +54,76 @@ export class Commander extends Creature {
     torso.castShadow = true;
     this.mesh.add(torso);
 
-    // pauldrons
+    // a chest plate seam + emblem so the torso doesn't read as a bare capsule
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.12), this.material);
+    plate.position.set(0, 1.5, 0.42);
+    this.mesh.add(plate);
+    const emblem = new THREE.Mesh(
+      new THREE.RingGeometry(0.06, 0.11, 5),
+      new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff3311, side: THREE.DoubleSide })
+    );
+    emblem.position.set(0, 1.55, 0.485);
+    this.mesh.add(emblem);
+
+    // waist skirt plates -- breaks up the capsule-to-legs transition
+    for (const sx of [-1, 0, 1]) {
+      const tass = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.34, 0.1), this.material);
+      tass.position.set(sx * 0.24, 0.78, 0.1);
+      tass.rotation.x = 0.15;
+      this.mesh.add(tass);
+    }
+
+    // greaves + boots so the legs aren't invisible under the torso capsule
+    for (const sx of [-1, 1]) {
+      const greave = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.13, 0.7, 8), this.material);
+      greave.position.set(sx * 0.22, 0.4, 0.05);
+      greave.castShadow = true;
+      this.mesh.add(greave);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.32), this.material);
+      boot.position.set(sx * 0.22, 0.07, 0.12);
+      this.mesh.add(boot);
+    }
+
+    // pauldrons with a spike so the shoulder line is jagged, not round
+    const spikeMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.5, metalness: 0.6 });
     for (const sx of [-1, 1]) {
       const pauldron = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), this.material);
       pauldron.position.set(sx * 0.62, 1.75, 0);
       pauldron.scale.set(1, 0.75, 1);
       pauldron.castShadow = true;
       this.mesh.add(pauldron);
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.28, 6), spikeMat);
+      spike.position.set(sx * 0.62, 2.05, -0.05);
+      this.mesh.add(spike);
     }
+
+    // a tattered cape -- the single biggest silhouette read at range, and it
+    // sways opposite his movement in update() so a charge reads as violent
+    this.cape = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.7, 1.3, 1, 4),
+      new THREE.MeshStandardMaterial({ color: 0x3a1418, roughness: 1, side: THREE.DoubleSide })
+    );
+    this.cape.position.set(0, 1.35, -0.42);
+    this.cape.rotation.x = 0.15;
+    this.mesh.add(this.cape);
 
     const helm = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 12), this.material);
     helm.position.y = 2.15;
     helm.castShadow = true;
     this.mesh.add(helm);
+
+    // a crest fin down the top of the helm
+    const crest = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.4, 4), spikeMat);
+    crest.position.set(0, 2.5, 0);
+    crest.rotation.x = -0.2;
+    this.mesh.add(crest);
+    // side vents -- reads as breathing apparatus, ties him to the lab tanks
+    for (const sx of [-1, 1]) {
+      const vent = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.14, 6), spikeMat);
+      vent.rotation.z = Math.PI / 2;
+      vent.position.set(sx * 0.32, 2.05, 0.12);
+      this.mesh.add(vent);
+    }
 
     // visor slit -- the only part of him that emits light, so you can read facing
     this.visorMat = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff3311 });
@@ -107,7 +169,10 @@ export class Commander extends Creature {
     this.speed = 3.5;
     this.material.color.setHex(0x8a5a4a);
     this.visorMat.emissive.setHex(0xffaa22);
+    this.cape.material.color.setHex(0x5a1010);
+    this._summonTimer = 3; // first wave comes quickly after the turn
     this.onPhaseChange?.(2);
+    this.onSummon?.(this); // "spawns scientist too" (기획서 5번)
   }
 
   _showRing(radius, progress) {
@@ -146,6 +211,14 @@ export class Commander extends Creature {
     if (!this.alive) return;
 
     if (this.phase === 1 && this.hp <= this.maxHp * PHASE2_AT) this._enterPhase2();
+
+    if (this.phase === 2) {
+      this._summonTimer -= dt;
+      if (this._summonTimer <= 0) {
+        this._summonTimer = SUMMON_INTERVAL;
+        this.onSummon?.(this);
+      }
+    }
 
     const dist = this.mesh.position.distanceTo(player.position);
     this._timer -= dt;
@@ -259,6 +332,11 @@ export class Commander extends Creature {
         break;
       }
     }
+
+    // cape lags behind facing/movement -- a cheap way to sell weight and speed
+    // without a real cloth sim; charging snaps it out straight behind him.
+    const capeTarget = this.state === 'charging' ? 0.6 : 0.15 + Math.sin(Date.now() * 0.002) * 0.05;
+    this.cape.rotation.x += (capeTarget - this.cape.rotation.x) * Math.min(1, dt * 4);
 
     this._applyHitFlash(dt, this.material);
   }

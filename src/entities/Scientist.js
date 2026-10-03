@@ -31,13 +31,42 @@ export class Scientist extends Creature {
     body.castShadow = true;
     this.mesh.add(body);
 
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.26, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0xd8b494, roughness: 0.9 })
+    // coat split at the front, hanging open -- two thin panels instead of one
+    // sealed capsule so the silhouette reads as a coat, not a robe
+    const panelMat = new THREE.MeshStandardMaterial({ color: 0xd6d3c8, roughness: 0.9 });
+    for (const sx of [-1, 1]) {
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.75, 0.04), panelMat);
+      panel.position.set(sx * 0.13, 0.7, 0.3);
+      this.mesh.add(panel);
+    }
+
+    // collar
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.04, 6, 12, Math.PI), coatMat);
+    collar.rotation.x = Math.PI;
+    collar.position.set(0, 1.32, 0.05);
+    this.mesh.add(collar);
+
+    // an ID badge clipped to the pocket -- a "person who used to work here" detail
+    const badge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.13, 0.015),
+      new THREE.MeshStandardMaterial({ color: 0x3a6ea5, emissive: 0x0c1a2a, roughness: 0.4 })
     );
+    badge.position.set(0.16, 1.05, 0.34);
+    this.mesh.add(badge);
+
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xd8b494, roughness: 0.9 });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 12), skinMat);
     head.position.y = 1.6;
     head.castShadow = true;
     this.mesh.add(head);
+
+    // a cap of hair -- without it the sphere head reads as bald from every angle
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshStandardMaterial({ color: 0x3a332c, roughness: 1 })
+    );
+    hair.position.y = 1.66;
+    this.mesh.add(hair);
 
     // blank reflective goggles -- reads as "not going to talk to you"
     this.goggleMat = new THREE.MeshStandardMaterial({
@@ -46,6 +75,17 @@ export class Scientist extends Creature {
     const goggles = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.1), this.goggleMat);
     goggles.position.set(0, 1.63, 0.23);
     this.mesh.add(goggles);
+    // strap around the back of the head so the goggles don't float
+    const strap = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.015, 6, 12), this.goggleMat);
+    strap.rotation.y = Math.PI / 2;
+    strap.position.set(0, 1.63, 0);
+    this.mesh.add(strap);
+
+    // gloved hands
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0xcbead8, roughness: 0.6 });
+    const offHand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), gloveMat);
+    offHand.position.set(-0.32, 1.0, 0.15);
+    this.mesh.add(offHand);
 
     // the syringe they're about to throw
     this.hand = new THREE.Mesh(
@@ -55,6 +95,10 @@ export class Scientist extends Creature {
     this.hand.rotation.x = Math.PI / 2;
     this.hand.position.set(0.34, 1.05, 0.2);
     this.mesh.add(this.hand);
+    const plunger = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 5), gloveMat);
+    plunger.rotation.x = Math.PI / 2;
+    plunger.position.set(0.34, 1.05, 0.37);
+    this.mesh.add(plunger);
   }
 
   update(dt, player) {

@@ -25,6 +25,7 @@ export class HUD {
           <div class="bar-track"><div id="hunger-fill" class="bar-fill hunger"></div></div>
           <div id="hunger-text" class="bar-text"></div>
         </div>
+        <div id="equip-row" class="equip-row hidden"></div>
         <div id="inventory" class="inventory"></div>
         <div id="message-log" class="message-log"></div>
       </div>
@@ -36,6 +37,8 @@ export class HUD {
         <div class="boss-track"><div id="boss-fill" class="boss-fill"></div></div>
       </div>
 
+      <div id="crosshair" class="crosshair hidden"></div>
+
       <div id="prompt" class="prompt hidden"></div>
 
       <div id="dialogue" class="dialogue hidden">
@@ -45,7 +48,7 @@ export class HUD {
       </div>
 
       <div id="hint-bar" class="hint-bar">
-        이동 WASD · 공격 Space · 상호작용 Enter · 먹기 F · 메뉴 Shift
+        이동 WASD · 시점 마우스 · 공격 클릭/Space · 상호작용 Enter · 먹기 F · 응급키트 E · 손전등 L · 메뉴 Esc
       </div>
 
       <div id="overlay" class="overlay hidden">
@@ -62,13 +65,16 @@ export class HUD {
     this.hpText = q('#hp-text');
     this.hungerFill = q('#hunger-fill');
     this.hungerText = q('#hunger-text');
+    this.equipRowEl = q('#equip-row');
     this.inventoryEl = q('#inventory');
     this.messageLogEl = q('#message-log');
     this.objectiveEl = q('#objective');
     this.bossBarEl = q('#boss-bar');
     this.bossNameEl = q('#boss-name');
     this.bossFillEl = q('#boss-fill');
+    this.crosshairEl = q('#crosshair');
     this.promptEl = q('#prompt');
+    this._hudVisible = false;
     this.dialogueEl = q('#dialogue');
     this.dialogueSpeakerEl = q('#dialogue-speaker');
     this.dialogueTextEl = q('#dialogue-text');
@@ -92,9 +98,9 @@ export class HUD {
     if (this.objectiveEl.textContent !== next) this.objectiveEl.textContent = next;
   }
 
-  setPrompt(text) {
+  setPrompt(text, { bare = false } = {}) {
     if (text) {
-      this.promptEl.textContent = `[Enter] ${text}`;
+      this.promptEl.textContent = bare ? text : `[Enter] ${text}`;
       this.promptEl.classList.remove('hidden');
     } else {
       this.promptEl.classList.add('hidden');
@@ -107,10 +113,22 @@ export class HUD {
     this.dialogueSpeakerEl.classList.toggle('hidden', !speaker);
     this.dialogueTextEl.textContent = text;
     this.setPrompt(null);
+    this._syncCrosshair();
   }
 
   hideDialogue() {
     this.dialogueEl.classList.add('hidden');
+    this._syncCrosshair();
+  }
+
+  // The reticle only belongs on screen during actual play -- not over a cutscene,
+  // a menu, or an ending card.
+  _syncCrosshair() {
+    const show =
+      this._hudVisible &&
+      this.dialogueEl.classList.contains('hidden') &&
+      this.overlayEl.classList.contains('hidden');
+    this.crosshairEl.classList.toggle('hidden', !show);
   }
 
   showBoss(name) {
@@ -127,14 +145,17 @@ export class HUD {
   }
 
   setHudVisible(visible) {
+    this._hudVisible = visible;
     this.root.querySelector('#hud').classList.toggle('hidden', !visible);
     this.objectiveEl.classList.toggle('hidden', !visible);
     this.hintBarEl.classList.toggle('hidden', !visible);
+    this._syncCrosshair();
   }
 
   showOverlay(title, subtitle = '', hint = '', { tone = '' } = {}) {
     this.hideDialogue();
     this.overlayEl.classList.remove('hidden');
+    this._syncCrosshair();
     this.overlayEl.className = `overlay ${tone}`;
     this.overlayTitleEl.textContent = title;
     this.overlaySubtitleEl.innerHTML = subtitle;
@@ -146,6 +167,7 @@ export class HUD {
   // Renders a keyboard-driven menu. Selection state lives in main.js; this just draws it.
   showMenu(title, items, selectedIndex, hint = '↑↓ 선택 · Enter 확인 · Shift 닫기') {
     this.overlayEl.classList.remove('hidden');
+    this._syncCrosshair();
     this.overlayEl.className = 'overlay menu-mode';
     this.overlayTitleEl.textContent = title;
     this.overlaySubtitleEl.textContent = '';
@@ -165,6 +187,7 @@ export class HUD {
   hideOverlay() {
     this.overlayEl.classList.add('hidden');
     this.overlayMenuEl.classList.add('hidden');
+    this._syncCrosshair();
   }
 
   update(dt, player) {
@@ -179,6 +202,12 @@ export class HUD {
 
     this.levelBadge.textContent = `Lv.${player.level}`;
     this.expFill.style.width = `${Math.min(100, (player.exp / player.expToNext) * 100)}%`;
+
+    const equipped = [];
+    if (player.armorMul < 1) equipped.push('방탄조끼');
+    if (player.hasFlashlight) equipped.push(`손전등(${player.flashlightOn ? '켜짐' : '꺼짐'})`);
+    this.equipRowEl.classList.toggle('hidden', equipped.length === 0);
+    this.equipRowEl.textContent = equipped.length ? `장착: ${equipped.join(' · ')}` : '';
 
     this.inventoryEl.innerHTML =
       player.inventory

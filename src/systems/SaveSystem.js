@@ -1,8 +1,20 @@
 // Save/load to localStorage. Covers 기획서 10번 ("저장 후 종료 / 일시정지") and
-// carries the run count between playthroughs, which is what the ??? ending
-// (기획서 8번) keys off.
+// carries the run count between playthroughs, which is what the ??? / 진 엔딩
+// (기획서 8번) key off.
 const SAVE_KEY = 'facility-survival:save';
 const META_KEY = 'facility-survival:meta';
+const SETTINGS_KEY = 'facility-survival:settings';
+
+// Player-facing options. cameraMode is the big one -- the game is first-person
+// by default but can be switched back to the third-person chase cam here.
+export const DEFAULT_SETTINGS = {
+  cameraMode: 'first', // 'first' | 'third'
+  sensitivity: 'normal', // 'low' | 'normal' | 'high'
+  invertY: false,
+  soundOn: true,
+};
+
+const SENSITIVITY_VALUES = { low: 0.0016, normal: 0.0028, high: 0.0044 };
 
 export const SaveSystem = {
   hasSave() {
@@ -55,7 +67,8 @@ export const SaveSystem = {
     return this.meta().clearCount ?? 0;
   },
 
-  // True once the player has seen the normal ending -- the 2회차 gate.
+  // True once the player has seen the normal ending -- the 2회차 gate. Both the
+  // hidden bosses and the 진 엔딩 route only open on a second run.
   get isNewGamePlus() {
     return this.clearCount > 0;
   },
@@ -69,5 +82,30 @@ export const SaveSystem = {
     } catch {
       /* ignore */
     }
+  },
+
+  // --- settings ---
+
+  get settings() {
+    try {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+    } catch {
+      return { ...DEFAULT_SETTINGS };
+    }
+  },
+
+  setSetting(key, value) {
+    const next = { ...this.settings, [key]: value };
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+    return next;
+  },
+
+  // radians of yaw/pitch per pixel of pointer motion
+  get lookSpeed() {
+    return SENSITIVITY_VALUES[this.settings.sensitivity] ?? SENSITIVITY_VALUES.normal;
   },
 };

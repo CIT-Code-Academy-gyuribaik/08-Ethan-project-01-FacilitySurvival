@@ -35,8 +35,28 @@ export class Deer extends Creature {
     head.castShadow = true;
     this.mesh.add(head);
 
+    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.18, 8), mat);
+    muzzle.rotation.x = Math.PI / 2;
+    muzzle.position.set(0, 0.96, 0.62);
+    this.mesh.add(muzzle);
+
+    // wide, alert ears -- a prey animal's tell, always turned toward the threat
+    const earMat = mat;
     for (const sx of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.62, 5), mat);
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 6), earMat);
+      ear.position.set(sx * 0.16, 1.16, 0.42);
+      ear.rotation.set(0.2, 0, sx * 0.9);
+      this.mesh.add(ear);
+    }
+
+    // short, flicking tail
+    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), mat);
+    tail.scale.set(1, 1, 0.7);
+    tail.position.set(0, 0.68, -0.34);
+    this.mesh.add(tail);
+
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.62, 5), mat);
       leg.position.set(sx * 0.17, 0.31, 0.22);
       this.mesh.add(leg);
       const back = leg.clone();
@@ -44,12 +64,28 @@ export class Deer extends Creature {
       this.mesh.add(back);
     }
 
-    const antlerMat = new THREE.MeshStandardMaterial({ color: 0x5a4a3a });
+    // branched antlers instead of bare cones -- two prongs each side so the
+    // silhouette reads as antlers and not thorns
+    const antlerMat = new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.85 });
     for (const sx of [-1, 1]) {
-      const antler = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.26, 5), antlerMat);
-      antler.position.set(sx * 0.09, 1.2, 0.44);
-      antler.rotation.z = sx * 0.3;
-      this.mesh.add(antler);
+      const beam = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.3, 5), antlerMat);
+      beam.position.set(sx * 0.1, 1.24, 0.42);
+      beam.rotation.z = sx * 0.35;
+      beam.rotation.x = -0.15;
+      this.mesh.add(beam);
+      const tine = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.15, 5), antlerMat);
+      tine.position.set(sx * 0.17, 1.34, 0.36);
+      tine.rotation.z = sx * 0.9;
+      this.mesh.add(tine);
+    }
+
+    // a few pale spots on the flank -- distinguishes it from the wolf's fur at a glance
+    const spotMat = new THREE.MeshStandardMaterial({ color: 0xd8c6a0, roughness: 1 });
+    for (const [sx, sy, sz] of [[0.2, 0.7, 0.05], [-0.22, 0.62, -0.1], [0.15, 0.6, -0.2]]) {
+      const spot = new THREE.Mesh(new THREE.CircleGeometry(0.055, 8), spotMat);
+      spot.position.set(sx, sy, sz);
+      spot.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
+      this.mesh.add(spot);
     }
   }
 

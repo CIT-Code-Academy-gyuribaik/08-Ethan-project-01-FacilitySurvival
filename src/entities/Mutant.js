@@ -1,35 +1,35 @@
 import * as THREE from 'three';
 import { Creature } from './Creature.js';
 import { Projectile } from './Projectile.js';
-import { furTexture, metalTexture } from '../world/Textures.js';
+import { organicTexture, veinGlowTexture, metalTexture } from '../world/Textures.js';
 
 const WAKE_RADIUS = 8;
 
-// The hidden bosses of 기획서 8번's ??? ending. They only exist on a second
-// run: the facility's original specimens, the things the wolves and deer were
-// copied FROM. Each drops one 이상한 재료, and all three are needed for the
-// secret ending.
+// The facility's failed experiments -- 기획서 4번의 project 0268 / 2045 / 1974,
+// the mini bosses of the ??? ending. They only exist on a second run: each drops
+// one 이상한 재료, and all three are needed for that ending.
 //
-// They sleep until you walk near, so a second-run player who just wants the
-// normal ending can walk past without ever fighting them.
+// They sleep until you walk near, so a second-run player who only wants the
+// normal ending can walk past without ever fighting them. Stats come straight
+// from 기획서 5번's balancing table.
 export const MUTANT_TYPES = {
-  'W-01': {
-    name: '표본 W-01',
-    subtitle: '늑대의 원형',
-    hp: 150, speed: 4.5, damage: 17, pattern: 'lunge',
-    tell: 0.6, cooldown: 2.1, range: 2.2,
+  '1974': {
+    name: 'project 1974',
+    subtitle: '실패한 실험체',
+    hp: 210, speed: 4.5, damage: 23, pattern: 'lunge',
+    tell: 0.6, cooldown: 2.1, range: 2.2, tint: '#b06a5c',
   },
-  'D-02': {
-    name: '표본 D-02',
-    subtitle: '사슴의 원형',
-    hp: 125, speed: 3.4, damage: 10, pattern: 'volley',
-    tell: 0.65, cooldown: 2.4, range: 9,
+  '2045': {
+    name: 'project 2045',
+    subtitle: '실패한 실험체',
+    hp: 234, speed: 3.4, damage: 21, pattern: 'volley',
+    tell: 0.65, cooldown: 2.4, range: 9, tint: '#a6a49a',
   },
-  'C-00': {
-    name: '표본 C-00',
-    subtitle: '폐기된 시제품',
-    hp: 190, speed: 2.5, damage: 22, pattern: 'slam',
-    tell: 1.0, cooldown: 2.2, range: 5.2,
+  '0268': {
+    name: 'project 0268',
+    subtitle: '실패한 실험체',
+    hp: 222, speed: 2.5, damage: 24, pattern: 'slam',
+    tell: 1.0, cooldown: 2.2, range: 5.2, tint: '#5a5148',
   },
 };
 
@@ -71,6 +71,10 @@ export class Mutant extends Creature {
     this.lootName = '이상한 재료';
     this.onProjectile = onProjectile;
     this.onWake = onWake;
+    // Runs 3+ scale this instead of def.damage directly -- def is the shared
+    // MUTANT_TYPES entry, not a per-instance copy, so mutating it would leak
+    // into every future spawn (including a fresh save).
+    this.damageMul = 1;
 
     this.awake = false;
     this.state = 'dormant';
@@ -84,75 +88,103 @@ export class Mutant extends Creature {
     this._buildMesh();
   }
 
+  // All three are "실패한 실험체" -- warped humanoids now, not the animal-shaped
+  // originals of the old build. One body, tinted per type; the attack pattern is
+  // what actually tells them apart in a fight.
   _buildMesh() {
     const t = this.typeId;
-    if (t === 'C-00') {
-      this.material = new THREE.MeshStandardMaterial({
-        map: metalTexture(), color: 0x5a5148, roughness: 0.5, metalness: 0.6,
-      });
-    } else {
-      this.material = new THREE.MeshStandardMaterial({
-        map: furTexture(t === 'W-01' ? '#c9bfae' : '#b9a98c'),
-        roughness: 1,
-      });
-    }
-    this._baseEmissive = 0x000000;
+    // 실패한 실험체: raw, scarred flesh with glowing vein cracks rather than fur --
+    // organicTexture/veinGlowTexture (0268 keeps its armor plating over the top).
+    this.material = new THREE.MeshStandardMaterial({
+      map: t === '0268' ? metalTexture() : organicTexture(this.def.tint),
+      emissive: t === '0268' ? 0x000000 : new THREE.Color(this.def.tint),
+      emissiveIntensity: 0.9,
+      color: new THREE.Color(this.def.tint),
+      roughness: t === '0268' ? 0.5 : 1,
+      metalness: t === '0268' ? 0.5 : 0,
+    });
+    if (t !== '0268') this.material.emissiveMap = veinGlowTexture(this.def.tint);
+    this._baseEmissive = t === '0268' ? 0x000000 : new THREE.Color(this.def.tint).getHex();
 
-    if (t === 'W-01') {
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1.2, 5, 10), this.material);
-      body.rotation.z = Math.PI / 2;
-      body.position.y = 0.85;
-      body.castShadow = true;
-      this.mesh.add(body);
-      const head = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.9, 8), this.material);
-      head.rotation.x = Math.PI / 2;
-      head.position.set(0, 0.95, 1);
-      this.mesh.add(head);
-      for (const sx of [-1, 1]) {
-        for (const dz of [0.5, -0.5]) {
-          const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.85, 6), this.material);
-          leg.position.set(sx * 0.32, 0.42, dz);
-          this.mesh.add(leg);
-        }
+    const heavy = t === '0268';
+    const torso = new THREE.Mesh(
+      new THREE.CapsuleGeometry(heavy ? 0.6 : 0.44, heavy ? 1.2 : 1, 6, 12),
+      this.material
+    );
+    torso.position.y = heavy ? 1.35 : 1.2;
+    torso.rotation.x = 0.12; // hunched
+    torso.castShadow = true;
+    this.mesh.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(heavy ? 0.34 : 0.3, 12, 12), this.material);
+    head.position.set(0, heavy ? 2.15 : 1.9, 0.18);
+    this.mesh.add(head);
+
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(
+        new THREE.CapsuleGeometry(heavy ? 0.19 : 0.14, heavy ? 0.95 : 0.85, 4, 8),
+        this.material
+      );
+      arm.position.set(sx * (heavy ? 0.72 : 0.56), heavy ? 1.35 : 1.2, 0.1);
+      arm.rotation.x = 0.35;
+      this.mesh.add(arm);
+      const leg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.13, 0.1, heavy ? 1.0 : 1.1, 6),
+        this.material
+      );
+      leg.position.set(sx * 0.24, heavy ? 0.5 : 0.55, 0);
+      this.mesh.add(leg);
+    }
+
+    // extra silhouette per type so they're not identical from across the room
+    const spikeMat = new THREE.MeshStandardMaterial({ color: 0x2a2422, roughness: 0.9 });
+    if (t === '2045') {
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const spine = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.6, 5), spikeMat);
+        spine.position.set(Math.cos(a) * 0.2, 1.5, 0.1 + Math.sin(a) * 0.2);
+        spine.rotation.set(Math.sin(a), 0, -Math.cos(a));
+        this.mesh.add(spine);
       }
-    } else if (t === 'D-02') {
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 1, 5, 10), this.material);
-      body.rotation.z = Math.PI / 2;
-      body.position.y = 1.15;
-      body.castShadow = true;
-      this.mesh.add(body);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 10), this.material);
-      head.position.set(0, 1.65, 0.75);
-      this.mesh.add(head);
-      // far too many antlers -- the "원형" of the thing you've been eating
-      const spikeMat = new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.9 });
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2;
-        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.75, 5), spikeMat);
-        spike.position.set(Math.cos(a) * 0.24, 1.95, 0.7 + Math.sin(a) * 0.24);
-        spike.rotation.set(Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5);
-        this.mesh.add(spike);
+      // a segmented tail curling behind it -- volley-caster reads as "keeps range
+      // with something that isn't legs"
+      let segPos = new THREE.Vector3(0, 1.3, -0.35);
+      for (let i = 0; i < 4; i++) {
+        const seg = new THREE.Mesh(new THREE.SphereGeometry(0.09 - i * 0.012, 6, 6), this.material);
+        seg.position.copy(segPos);
+        this.mesh.add(seg);
+        segPos = segPos.clone().add(new THREE.Vector3(0, -0.05, -0.18));
       }
+    } else if (t === '1974') {
+      const claws = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.5, 6), spikeMat);
+      claws.rotation.x = Math.PI / 2;
+      claws.position.set(0, 1.15, 0.7);
+      this.mesh.add(claws);
+      // a second, oversized clawed arm hanging off one shoulder -- the lunger's
+      // asymmetry, so it reads as "wrong" even standing still
+      const bigArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 1.05, 4, 8), this.material);
+      bigArm.position.set(-0.75, 1.05, 0.15);
+      bigArm.rotation.x = 0.5;
+      bigArm.rotation.z = 0.2;
+      this.mesh.add(bigArm);
+      const bigClaw = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.32, 5), spikeMat);
+      bigClaw.rotation.x = Math.PI / 2.2;
+      bigClaw.position.set(-0.85, 0.55, 0.5);
+      this.mesh.add(bigClaw);
+    } else if (t === '0268') {
+      // exposed chest core glowing through a gap in the armor plating -- the
+      // heavy one's "wound" that ties it back to the same body-horror family
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 10, 10),
+        new THREE.MeshStandardMaterial({ color: 0x1a0a0a, emissive: new THREE.Color(this.def.tint).multiplyScalar(2.2) })
+      );
+      core.position.set(0, 1.35, 0.56);
+      this.mesh.add(core);
+      // shoulder plating
       for (const sx of [-1, 1]) {
-        for (const dz of [0.42, -0.42]) {
-          const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.06, 1.15, 6), this.material);
-          leg.position.set(sx * 0.28, 0.57, dz);
-          this.mesh.add(leg);
-        }
-      }
-    } else {
-      // C-00: the commander's silhouette, unfinished
-      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.15, 6, 12), this.material);
-      torso.position.y = 1.3;
-      torso.castShadow = true;
-      this.mesh.add(torso);
-      const helm = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 10), this.material);
-      helm.position.y = 2.15;
-      this.mesh.add(helm);
-      for (const sx of [-1, 1]) {
-        const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.9, 4, 8), this.material);
-        arm.position.set(sx * 0.72, 1.35, 0);
-        this.mesh.add(arm);
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.4, 0.5), this.material);
+        plate.position.set(sx * 0.68, 1.75, 0);
+        this.mesh.add(plate);
       }
     }
 
@@ -160,7 +192,7 @@ export class Mutant extends Creature {
     this.eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x000000 });
     for (const sx of [-1, 1]) {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), this.eyeMat);
-      eye.position.set(sx * 0.14, this.typeId === 'C-00' ? 2.16 : 1.05, this.typeId === 'C-00' ? 0.32 : 1.35);
+      eye.position.set(sx * 0.12, heavy ? 2.18 : 1.93, heavy ? 0.48 : 0.44);
       this.mesh.add(eye);
     }
 
@@ -227,7 +259,7 @@ export class Mutant extends Creature {
       const dir = base.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), spread);
       this.onProjectile?.(
         new Projectile(this.mesh.position, dir, {
-          damage: this.def.damage, speed: 11, color: 0xcc66ff,
+          damage: this.def.damage * this.damageMul, speed: 11, color: 0xcc66ff,
         })
       );
     }
@@ -306,7 +338,7 @@ export class Mutant extends Creature {
           this.aura.intensity = 0.8;
           this._hideRing();
           if (this.def.pattern === 'slam') {
-            if (dist <= this.def.range) player.takeDamage(this.def.damage);
+            if (dist <= this.def.range) player.takeDamage(this.def.damage * this.damageMul);
             this.onSlam?.(this.mesh.position.clone(), this.def.range);
             this.state = 'recover';
             this._timer = 0.6;
@@ -335,7 +367,7 @@ export class Mutant extends Creature {
         this.mesh.position.z = resolved.z;
         if (!this._hitThisDash && this.mesh.position.distanceTo(player.position) < 1.7) {
           this._hitThisDash = true;
-          player.takeDamage(this.def.damage);
+          player.takeDamage(this.def.damage * this.damageMul);
         }
         if (this._timer <= 0 || blocked) {
           this.state = 'recover';

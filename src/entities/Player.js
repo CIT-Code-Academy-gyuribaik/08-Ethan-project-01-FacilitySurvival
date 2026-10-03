@@ -45,9 +45,28 @@ export class Player {
     this.attackDamage = 15;
     this.invulnTimer = 0;
 
+    // 장비(equip 아이템). 슬롯 UI는 없지만 boost처럼 줍는 즉시 영구 적용된다 --
+    // armorMul은 들어오는 피해에 곱해지고, 손전등은 hasFlashlight로 소지 여부만
+    // 갖고 실제 on/off(flashlightOn)는 main.js가 L키로 토글한다.
+    this.armorMul = 1;
+    this.hasFlashlight = false;
+    this.flashlightOn = false;
+    if (this.armorMesh) this.armorMesh.visible = false; // _buildMesh() runs before the first reset()
+
+    // facingAngle is the yaw the mouse controls; pitch is look up/down (camera
+    // only -- movement stays on the ground plane). Combat and the tests read
+    // facingAngle, so it stays the single source of truth for "which way am I
+    // pointing".
     this.facingAngle = 0;
+    this.pitch = 0;
     if (spawnPos) this.mesh.position.copy(spawnPos);
     this.mesh.rotation.y = 0;
+  }
+
+  // 0 at rest, rises to ~1 in the middle of a swing. Drives the first-person
+  // weapon viewmodel in main.js.
+  get swingT() {
+    return Math.max(0, Math.sin((1 - this.attackCooldownTimer / ATTACK_COOLDOWN) * Math.PI));
   }
 
   _buildMesh() {
@@ -64,6 +83,17 @@ export class Player {
     head.position.y = 1.65;
     head.castShadow = true;
     group.add(head);
+
+    // Armor vest -- built in either way, but only shown once equip() turns it
+    // on. Only visible in third-person (first-person hides player.mesh
+    // entirely), but the HUD's "장착: 방탄조끼" line is the reliable feedback.
+    this.armorMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.68, 0.55, 0.42),
+      new THREE.MeshStandardMaterial({ color: 0x445544, roughness: 0.7, metalness: 0.2 })
+    );
+    this.armorMesh.position.y = 1.05;
+    this.armorMesh.visible = false;
+    group.add(this.armorMesh);
 
     // forward indicator so facing reads clearly in third person
     const nose = new THREE.Mesh(
@@ -152,18 +182,28 @@ export class Player {
     }
   }
 
+  // 'equip' 아이템 하나 적용. 여러 개를 주워도 최고치 하나만 남는다(중복 장착
+  // 해봐야 손전등 두 개, 조끼 두 벌은 의미가 없다).
+  equip(def) {
+    if (def.slot === 'armor') {
+      this.armorMul = Math.min(this.armorMul, def.damageMul);
+      this.armorMesh.visible = true;
+    }
+    if (def.slot === 'tool') this.hasFlashlight = true;
+  }
+
   // ---- combat -----------------------------------------------------------
 
   takeDamage(amount, { ignoreInvuln = false } = {}) {
     if (!this.alive) return false;
     if (!ignoreInvuln && this.invulnTimer > 0) return false;
-    this.hp = Math.max(0, this.hp - amount);
+    this.hp = Math.max(0, this.hp - amount * this.armorMul);
     if (!ignoreInvuln) this.invulnTimer = INVULN_AFTER_HIT;
     if (this.hp <= 0) this.alive = false;
     return true;
   }
 
-  update(dt, input, camera) {
+  update(dt, input) {
     if (!this.alive) return;
 
     this.invulnTimer = Math.max(0, this.invulnTimer - dt);
@@ -182,18 +222,16 @@ export class Player {
       return;
     }
 
-    // --- movement, relative to camera yaw so WASD stays consistent ---
+    // --- movement, relative to where the mouse is pointing (facingAngle) so
+    //     WASD stays consistent in both camera modes ---
     const move = input.moveVector;
     if (move.x !== 0 || move.z !== 0) {
-      const camYaw = Math.atan2(
-        camera.position.x - this.mesh.position.x,
-        camera.position.z - this.mesh.position.z
-      );
-      const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).negate();
-      const right = new THREE.Vector3(forward.z, 0, -forward.x);
+      const yaw = this.facingAngle;
+      const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
       const dir = new THREE.Vector3();
-      dir.addScaledVector(forward, -move.z);
+      dir.addScaledVector(forward, -move.z); // W (move.z = -1) walks forward
       dir.addScaledVector(right, move.x);
       if (dir.lengthSq() > 0) {
         dir.normalize();
@@ -205,10 +243,9 @@ export class Player {
         );
         this.mesh.position.x = resolved.x;
         this.mesh.position.z = resolved.z;
-        this.facingAngle = Math.atan2(dir.x, dir.z);
-        this.mesh.rotation.y = this.facingAngle;
       }
     }
+    this.mesh.rotation.y = this.facingAngle;
 
     // --- attack ---
     if (this.attackCooldownTimer > 0) this.attackCooldownTimer -= dt;

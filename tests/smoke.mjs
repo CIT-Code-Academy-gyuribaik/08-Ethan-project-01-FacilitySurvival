@@ -6,9 +6,11 @@
 // findable by playing: unreachable rooms, a door that doesn't block, an enemy
 // that never lands a hit, a boss that can't be killed.
 const ctx2d = () => ({
-  fillStyle: '', strokeStyle: '', lineWidth: 1,
-  fillRect() {}, strokeRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
-  stroke() {}, arc() {}, fill() {},
+  fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textBaseline: '',
+  fillRect() {}, strokeRect() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
+  stroke() {}, arc() {}, fill() {}, bezierCurveTo() {}, quadraticCurveTo() {},
+  fillText() {}, // signTexture -- draws labels, never reads them back
+  save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
   createRadialGradient: () => ({ addColorStop() {} }),
   getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
   putImageData() {},
@@ -23,11 +25,13 @@ const { Wolf } = await import(`${B}/entities/Wolf.js`);
 const { Deer } = await import(`${B}/entities/Deer.js`);
 const { Scientist } = await import(`${B}/entities/Scientist.js`);
 const { Commander } = await import(`${B}/entities/Commander.js`);
+const { Gatekeeper } = await import(`${B}/entities/Gatekeeper.js`);
 const { Pickup } = await import(`${B}/entities/Pickup.js`);
 const { CombatSystem } = await import(`${B}/systems/CombatSystem.js`);
 const { InteractionSystem } = await import(`${B}/systems/Interaction.js`);
 const { WORLD_ITEMS } = await import(`${B}/systems/Items.js`);
 const { Mutant, MUTANT_TYPES } = await import(`${B}/entities/Mutant.js`);
+const { Doppelganger } = await import(`${B}/entities/Doppelganger.js`);
 const { DialogueSystem, SCRIPT } = await import(`${B}/systems/Dialogue.js`);
 const { HIDDEN_BOSSES } = await import(`${B}/world/LevelData.js`);
 
@@ -85,7 +89,10 @@ const FORWARD = { x: 0, z: -1 }; // W / ArrowUp -- away from the camera
 // ---------------------------------------------------------------- 맵
 
 section('맵');
-check('구역 개수', facility.areas.size === 13, `areas=${facility.areas.size}`);
+check('구역 개수', facility.areas.size === 14, `areas=${facility.areas.size}`);
+check('"???" 구역이 걸을 수 있게 지어짐',
+  facility.isWalkable(facility.sanctumCenter.x, facility.sanctumCenter.z, 0.8) &&
+  facility.isWalkable(facility.sanctumEntrance.x, facility.sanctumEntrance.z, 0.8));
 
 teleport(0, -3);
 walk(700, FORWARD);
@@ -108,8 +115,8 @@ for (const it of WORLD_ITEMS) {
 check('배치된 아이템 전부 주울 수 있음', unreachableItems.length === 0, unreachableItems.join(', '));
 
 // props must actually block
-check('창고 선반이 통과 불가', !facility.isWalkable(-28, 24));
-check('선반 사이 통로는 통과 가능', facility.isWalkable(-28, 21.5));
+check('창고 선반이 통과 불가', !facility.isWalkable(-42.8, 40));
+check('선반 사이 통로는 통과 가능', facility.isWalkable(-42.8, 35));
 
 // ------------------------------------------------------------ 잠긴 문
 
@@ -117,7 +124,7 @@ section('잠긴 문 / 2장 진입');
 facility.resetDoors();
 teleport(0, 48);
 walk(600, FORWARD);
-check('키카드 없이는 문에 막힘', player.position.z < 55.3, `z=${player.position.z.toFixed(2)}`);
+check('키카드 없이는 문에 막힘', player.position.z < 91.3, `z=${player.position.z.toFixed(2)}`);
 
 facility.unlockGate();
 for (let i = 0; i < 120; i++) facility.update(DT); // 문이 올라가는 연출
@@ -127,7 +134,7 @@ check('문을 연 뒤 아레나 진입', where === 'arena', `${where}, z=${playe
 check('문이 천장으로 올라감', facility.gateDoor.mesh.position.y > 4);
 
 facility.resetDoors();
-check('문 잠금 복구 (새 게임 대비)', !facility.gateDoor.open && !facility.isWalkable(0, 56));
+check('문 잠금 복구 (새 게임 대비)', !facility.gateDoor.open && !facility.isWalkable(0, 92));
 
 // ------------------------------------------------------------ 전투
 
@@ -175,8 +182,8 @@ check('레벨업으로 강해짐',
   `Lv.${before.lv}→${player.level}, 공격력 ${before.atk}→${player.attackDamage}, 최대HP ${before.hp}→${player.maxHp}`);
 
 player.reset(facility.spawnPoint);
-teleport(0, 20);
-const wolf = new Wolf(facility, new THREE.Vector3(5, 0, 20), 2);
+teleport(0, 30);
+const wolf = new Wolf(facility, new THREE.Vector3(5, 0, 30), 2);
 const hpBefore = player.hp;
 for (let i = 0; i < 600; i++) {
   wolf.update(DT, player);
@@ -194,18 +201,47 @@ const hpBeforeDart = player.hp;
 for (let i = 0; i < 300; i++) for (const d of darts) d.update(DT, player, facility);
 check('주사기가 소멸(명중 또는 벽)', darts.every((d) => !d.alive), `HP ${hpBeforeDart.toFixed(0)} → ${player.hp.toFixed(0)}`);
 
+// -------------------------------------------------- 문지기 (1장 미니보스)
+//
+// attackLoop()가 파일 위쪽에서 만든 공유 `combat`(및 `enemies`)을 쓴다 -- 여기서
+// 별도 CombatSystem을 새로 만들면 그 생성자가 player.onAttack을 가로채서,
+// 뒤에 나오는 "project 0003" 절이 쓰는 공유 combat이 조용히 끊긴다(그 절은
+// 이 절보다 나중에 나오므로). 자체 CombatSystem은 이 파일에서 이미 쓰인
+// combat 절 이후(숨겨진 보스/도플갱어)에서만 안전하다.
+
+section('문지기 (1장 미니보스, 출입 카드 수호자)');
+player.reset(facility.spawnPoint);
+{
+  const gk = new Gatekeeper(facility, new THREE.Vector3(40, 0, 40));
+  const hpStart = player.hp;
+  for (let i = 0; i < 900; i++) {
+    teleport(40, 38.3); // hold in attack range so this tests its swing, not the chase
+    gk.update(DT, player);
+    player.invulnTimer = Math.max(0, player.invulnTimer - DT);
+  }
+  check('문지기가 피해를 입힘', player.hp < hpStart, `HP ${hpStart.toFixed(0)} → ${player.hp.toFixed(0)}`);
+
+  player.reset(facility.spawnPoint);
+  teleport(40, 40);
+  enemies.push(gk);
+  const gkSwings = attackLoop(2000, gk, { chase: true, each: () => { player.hp = player.maxHp; } });
+  check('문지기 처치 가능', !gk.alive, `${gkSwings}회 공격, HP ${gk.hp}/${gk.maxHp}`);
+  check('문지기가 출입 카드를 떨굼', gk.lootId === 'keycard');
+}
+
 // ------------------------------------------------------------ 보스
 
-section('사령관 (최종 보스)');
+section('project 0003 (최종 보스)');
 player.reset(facility.spawnPoint);
-player.attackDamage = 40;
-teleport(0, 84);
-const boss = new Commander(facility, new THREE.Vector3(0, 0, 86));
+player.attackDamage = 22; // low enough that the 2페이즈 window isn't skipped
+teleport(0, 140);
+const boss = new Commander(facility, new THREE.Vector3(0, 0, 142));
 enemies.push(boss);
-let slams = 0, sawTelegraph = false, phase2 = false;
+let slams = 0, sawTelegraph = false, phase2 = false, summons = 0;
 boss.onSlam = () => slams++;
 boss.onPhaseChange = () => { phase2 = true; };
-const bossSwings = attackLoop(4000, boss, {
+boss.onSummon = () => { summons++; };
+const bossSwings = attackLoop(5000, boss, {
   chase: true,
   each: () => {
     player.hp = player.maxHp; // testing the boss, not survival
@@ -215,6 +251,7 @@ const bossSwings = attackLoop(4000, boss, {
 check('공격 예고(바닥 링)가 뜸', sawTelegraph);
 check('체력 절반에서 2페이즈 전환', phase2, `phase=${boss.phase}`);
 check('내려찍기 사용', slams > 0, `${slams}회`);
+check('2페이즈에서 연구원을 호출함 (기획서 5번)', summons > 0, `${summons}회`);
 check('보스를 쓰러뜨릴 수 있음', !boss.alive, `${bossSwings}회 공격, HP ${boss.hp}/${boss.maxHp}`);
 
 // ------------------------------------------------------------ 상호작용
@@ -323,7 +360,7 @@ for (let i = 0; i < 60; i++) leashBoss.update(DT, player);
 const wokeUp = leashBoss.awake;
 leashBoss.hp = leashBoss.maxHp * 0.5; // 절반 깎아둔 상태로 도망친다
 
-teleport(2, 22); // 중앙 홀 반대편으로 도주
+teleport(2, 45); // 중앙 홀 반대편으로 도주
 let chasedDistance = Infinity;
 for (let i = 0; i < 900; i++) {
   leashBoss.update(DT, player);
@@ -354,6 +391,74 @@ rageBoss.update(DT, player);
 check('체력 절반에서 격앙 전환', rageBoss.enraged && announced);
 check('격앙 시 더 빨라짐', rageBoss.speed > calmSpeed,
   `${calmSpeed.toFixed(1)} → ${rageBoss.speed.toFixed(1)}`);
+
+// ------------------------------------------------------ 진 엔딩: "너" (도플갱어)
+
+section('도플갱어 / 진 엔딩');
+
+// 움직임을 한 박자 늦게 따라온다: 플레이어가 걸으면 도플갱어도 따라 걷는다
+player.reset(facility.spawnPoint);
+teleport(facility.sanctumCenter.x, facility.sanctumCenter.z);
+{
+  const you = new Doppelganger(facility, new THREE.Vector3(
+    facility.sanctumCenter.x, 0, facility.sanctumCenter.z + 3
+  ));
+  const startDist = you.position.distanceTo(player.position);
+  // player walks away for a bit
+  input.moveVector = { x: 0, z: -1 };
+  for (let i = 0; i < 240; i++) {
+    player.update(DT, input);
+    you.update(DT, player);
+  }
+  input.moveVector = { x: 0, z: 0 };
+  check('도플갱어가 플레이어를 따라 이동함', you.position.distanceTo(you.home) > 2,
+    `둥지에서 ${you.position.distanceTo(you.home).toFixed(1)}m 이동`);
+  check('한 박자 늦게 따라오므로 거리를 유지', Math.abs(you.position.distanceTo(player.position) - startDist) < 6,
+    `거리 ${you.position.distanceTo(player.position).toFixed(1)}m`);
+}
+
+// 플레이어가 때리면, 도플갱어도 한 박자 뒤에 되받아쳐서 피해를 준다
+player.reset(facility.spawnPoint);
+{
+  const you = new Doppelganger(facility, new THREE.Vector3(0, 0, 2));
+  teleport(0, 0);
+  const hpStart = player.hp;
+  for (let i = 0; i < 420; i++) {
+    player.mesh.position.set(you.position.x, 0, you.position.z - 1.4);
+    player.facingAngle = 0;
+    input.attackPressed = player.attackCooldownTimer <= 0;
+    player.update(DT, input);
+    you.update(DT, player);
+    player.invulnTimer = Math.max(0, player.invulnTimer - DT);
+    input.endFrame();
+  }
+  check('되받아치기로 플레이어가 피해를 입음', player.hp < hpStart,
+    `HP ${hpStart.toFixed(0)} → ${player.hp.toFixed(0)}`);
+}
+
+// 그리고 쓰러뜨릴 수 있어야 한다
+player.reset(facility.spawnPoint);
+{
+  const you = new Doppelganger(facility, new THREE.Vector3(0, 0, 2));
+  const solo = [you];
+  const soloCombat = new CombatSystem(player, solo, {});
+  player.attackDamage = 60;
+  player.hp = 9999; player.maxHp = 9999;
+  let killed = false;
+  you.onDeath = () => { killed = true; };
+  for (let i = 0; i < 20000 && you.alive; i++) {
+    player.mesh.position.set(you.position.x, 0, you.position.z - 1.6);
+    player.facingAngle = 0;
+    input.attackPressed = player.attackCooldownTimer <= 0;
+    player.update(DT, input);
+    soloCombat.update(DT);
+    you.update(DT, player);
+    player.hp = player.maxHp;
+    input.endFrame();
+  }
+  check('도플갱어 처치 가능', !you.alive && killed, `HP ${you.hp.toFixed(0)}/${you.maxHp}`);
+  check('절반 아래에서 격앙', you.enraged);
+}
 
 // 대사 시스템: Enter 한 번이 열기와 넘기기를 동시에 하면 안 된다
 section('대사');

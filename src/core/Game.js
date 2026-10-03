@@ -5,7 +5,7 @@ import * as THREE from 'three';
 export class Game {
   constructor(canvas) {
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x1a1708, 0.045);
+    this.scene.fog = new THREE.FogExp2(0x243420, 0.03);
 
     this.camera = new THREE.PerspectiveCamera(
       65,
@@ -28,10 +28,14 @@ export class Game {
   }
 
   _setupLights() {
-    // Dim ambient + a few flickering point lights reads as "abandoned facility".
-    const ambient = new THREE.AmbientLight(0x554422, 0.55);
+    // Ambient + hemisphere fill the darkness between lanterns, so this is the
+    // cheapest global brightness knob -- intensities kept from the original
+    // "map reads too dark to see" fix, just recolored for canopy-filtered
+    // daylight instead of indoor fluorescents (sky-facing tint, mossy ground
+    // bounce).
+    const ambient = new THREE.AmbientLight(0x3a4a2e, 0.85);
     this.scene.add(ambient);
-    this.hemi = new THREE.HemisphereLight(0xfff3c4, 0x1a1708, 0.35);
+    this.hemi = new THREE.HemisphereLight(0xbfe0c0, 0x2a3a20, 0.55);
     this.scene.add(this.hemi);
   }
 
